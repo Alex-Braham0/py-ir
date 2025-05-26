@@ -1,0 +1,1 @@
+{"input": {"format": 4, "channels": 1, "rate": 44100}, "output": {"format": 1, "channels": 1, "rate": 44100}, "buffer_size": 512, "ir_filename": false, "default_gain": 1, "default_drywet": 0.5}
