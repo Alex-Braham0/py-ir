@@ -40,7 +40,9 @@ class Main():
                 valid = False
             elif check_config["input"]["channels"] not in [1, 2] or check_config["output"]["channels"] not in [1, 2]:
                 valid = False
-            elif check_config["input"]["rate"] not in [44100, 48000] or check_config["output"]["rate"] not in [44100, 48000]:
+            elif check_config["input"]["device"] != False and type(check_config["input"]["device"]) != int or check_config["output"]["device"] != False and type(check_config["output"]["device"]) != int:
+                valid = False
+            elif check_config["rate"] not in [44100, 48000]:
                 valid = False
             elif check_config["buffer_size"] not in [64, 128, 256, 512, 2048, 4096]:
                 valid = False
@@ -58,17 +60,19 @@ class Main():
 
         # Set Input settings
         config["input"] = {}
+        config["input"]["device"] = False
         config["input"]["format"] = pyaudio.paInt24
         config["input"]["channels"] = 1
-        config["input"]["rate"] = 44100
+        
 
         # Set Output Settings
         config["output"] = {}
+        config["output"]["device"] = False
         config["output"]["format"] = pyaudio.paFloat32
         config["output"]["channels"] = 1
-        config["output"]["rate"] = 44100
 
         # Set other Settings
+        config["rate"] = 44100
         config["buffer_size"] = 512
         config["ir_filename"] = False
         config["default_gain"] = 1
@@ -83,20 +87,22 @@ class Main():
     def menu(self):
         while True:
             print("")
+            # self.change_input_device()
             choice = input()
-            self.close_streams()
 
     def start_output(self):
+        print("Starting output audio stream...")
+        print(f"Output device: {self.output_device['name']}")
 
         # Start output stream
         output_stream = self.audio.open(
-            rate=self.config["output"]["rate"],
+            rate=self.config["rate"],
             channels=self.config["output"]["channels"],
             format=self.config["output"]["format"],
             output=True,
-            frames_per_buffer=self.config["buffer_size"])
+            frames_per_buffer=self.config["buffer_size"],
+            output_device_index=self.output_device["index"])
         
-        print("Starting output audio stream...")
         if output_stream.is_active():
             print("Stream initialised successfully")
             return output_stream
@@ -104,17 +110,45 @@ class Main():
             print("Stream failed to initialise")
             return False
         
-
+    def change_input_device(self):
+        print("All input devices:")
+        input_devices = [self.audio.get_device_info_by_index(device_index) for device_index in range(self.audio.get_device_count()) if self.audio.get_device_info_by_index(device_index)["maxInputChannels"] > 0]
+        for display_index, device in enumerate(input_devices):
+            print(f"{display_index+1}: {device['name']}")
+        valid_selected_device = False
+        while not valid_selected_device:
+            selected_device = input("Select a device: ")
+            if selected_device.isdigit() and int(selected_device) <= len(input_devices) and int(selected_device) > 0:
+                valid_selected_device = 1
+                selected_device = input_devices[int(selected_device)-1]
+        return selected_device["index"]
+    
+    def change_output_device(self):
+        print("All output devices:")
+        output_devices = [self.audio.get_device_info_by_index(device_index) for device_index in range(self.audio.get_device_count()) if self.audio.get_device_info_by_index(device_index)["maxOutputChannels"] > 0]
+        for display_index, device in enumerate(output_devices):
+            print(f"{display_index+1}: {device['name']}")
+        valid_selected_device = False
+        while not valid_selected_device:
+            selected_device = input("Select a device: ")
+            if selected_device.isdigit() and int(selected_device) <= len(output_devices) and int(selected_device) > 0:
+                valid_selected_device = 1
+                selected_device = output_devices[int(selected_device)-1]
+        return selected_device["index"]
+        
     def start_input(self):
+        print("Starting input audio stream...")
+        print(f"Input device: {self.input_device['name']}")
         # Start output stream
         input_stream = self.audio.open(
-            rate=self.config["input"]["rate"],
+            rate=self.config["rate"],
             channels=self.config["input"]["channels"],
             format=self.config["input"]["format"],
             input=True,
-            frames_per_buffer=self.config["buffer_size"])
+            frames_per_buffer=self.config["buffer_size"],
+            input_device_index=self.input_device["index"])
         
-        print("Starting input audio stream...")
+        
         if input_stream.is_active():
             print("Stream initialised successfully")
             return input_stream
@@ -123,11 +157,16 @@ class Main():
             return False
     
     def start_streams(self):
+        # Load audio devices
+        self.audio = pyaudio.PyAudio()  # Might crash here
+        self.input_device = self.audio.get_default_input_device_info()
+        self.output_device = self.audio.get_default_output_device_info()
 
+        # Set default variables
         self.gain = self.config["default_gain"]
         self.drywet = self.config["default_drywet"]
 
-        self.audio = pyaudio.PyAudio()  # Might crash here
+        
         self.ir = self.select_ir(self.config["ir_filename"])  # Or here
         output_stream = self.start_output()
         input_stream = self.start_input()
@@ -159,7 +198,7 @@ class Main():
         buffer_size = self.config["buffer_size"]
         enable_convolve = True
 
-        while True:
+        while self.continue_loop:
             # Read input stream
             data = input_stream.read(buffer_size)
 
@@ -182,6 +221,8 @@ class Main():
 
             byte = f32_audio.tobytes()
             output_stream.write(byte)
+
+        self.close_streams(output_stream, input_stream)
 
     def ols_convolve(self, chunk, ir, overlap, fft_ir=None):
         """
